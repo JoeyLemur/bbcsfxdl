@@ -4,6 +4,7 @@
 require 'sqlite3'
 require 'net/http'
 require 'digest'
+require 'progressbar'
 
 # Where to store the downloaded stuff
 DLDIR = '/path/to/downloads'
@@ -60,12 +61,27 @@ rs.each do |row|
   # Determine the path where to write the file
   filename = "#{DLDIR}/#{row[1]}"
 
-  # Download the data
-  resp = http.get("/assets/#{row[1]}")
+  # Set up progress bar
+  bytecounter = 0
+  pbar = ProgressBar.create(
+  :title => row[1],
+  :starting_at => 0,
+  :total => row[2].to_i,
+  :format => '%a %B %p%% %r KB/sec',
+  :rate_scale => lambda { |rate| rate / 1024 }
+  )
+  # Open the output file
+  File.open(filename,'wb') do |file|
+    # Perform the download, incrementing the progress bar as it goes
+    http.get("/assets/#{row[1]}") do |data|
+      file.write data
+      bytecounter += data.length
+      pbar.progress = bytecounter
+    end
+  end
+  # Close out the progresss bar
+  pbar.finish
 
-  # Write the data out
-  open(filename,'wb') { |file| file.write(resp.body) }
-  
   # Get the filesize of the data we wrote
   filesize = File.size(filename).to_i
 
@@ -73,9 +89,10 @@ rs.each do |row|
   if filesize != row[2].to_i then
     STDERR.puts <<-EOS
     ***ARGH ARGH ARGH***
-    Filesizes not the same!
+    Filesizes not the same for #{filename}!  Deleting it.
     Expected #{row[2].to_i}, got #{filesize.to_i}
     EOS
+    File.delete(filename)
     stmt.close if stmt
     db.close if db
     Kernel.exit(1)
