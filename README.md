@@ -2,7 +2,7 @@
 Scripts to download the BBC Sound Effects archive
 
 ## Description
-Three Ruby scripts I hacked together in a couple hours to download the BBC Sound Effects archive (http://http://bbcsfx.acropolis.org.uk/) in a managable manner.
+Three Ruby scripts I hacked together in a couple hours to download the BBC Sound Effects archive (http://bbcsfx.acropolis.org.uk/) in a managable manner.
 
 ## Usage
 - This was developed on Ruby 2.5, and requires the sqlite3 gem.
