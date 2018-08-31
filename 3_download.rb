@@ -17,6 +17,9 @@ GBYTE = MBYTE * 1024
 # Configure how much to download at one go
 DOWNLOAD_LIMIT = 20 * GBYTE
 
+# Define the download rate per second (in bytes), unlimited if commented out
+RATE_LIMIT = 256 * KBYTE
+
 # Pretty-print decimal numbers
 # https://dzone.com/articles/format-number-thousands
 def commas(number)
@@ -72,11 +75,26 @@ rs.each do |row|
   )
   # Open the output file
   File.open(filename,'wb') do |file|
+    # For rate limiting, store the time we start the download process
+    startTime = Time.now.to_f
     # Perform the download, incrementing the progress bar as it goes
     http.get("/assets/#{row[1]}") do |data|
       file.write data
       bytecounter += data.length
       pbar.progress = bytecounter
+      # Handle rate limiting, if defined
+      if defined?(RATE_LIMIT) then
+        # Total time spend for the download
+        timeTotal = Time.now.to_f - startTime
+        # Average bytes per second
+        rate = bytecounter / timeTotal
+        # If we've downloaded more than we wanted...
+        if rate > RATE_LIMIT then
+          howLong = (bytecounter.to_f / RATE_LIMIT)  # How many seconds it should've taken at RATE_LIMIT
+          toSleep = howLong-timeTotal  # Calc how long to sleep for to maintain the rate
+          sleep(toSleep) #Sleep
+        end
+      end
     end
   end
   # Close out the progresss bar

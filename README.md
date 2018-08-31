@@ -6,7 +6,7 @@ Three Ruby scripts I hacked together in a couple hours to download the BBC Sound
 
 ## Usage
 - This was developed on Ruby 2.5, and requires the sqlite3 and progressbar gems.
-- Two items need your attention in 3_downloads.rb -- path to store downloaded files (DLDIR), and the amount of data to download per run (DOWNLOAD_LIMIT).
+- Three items need your attention in 3_downloads.rb -- path to store downloaded files (DLDIR), the amount of data to download per run (DOWNLOAD_LIMIT), and a rate limit in bytes per second (RATE_LIMIT).  RATE_LIMIT can be commented out to prevent any rate limiting.
 
 - Run 1_import.rb first to set up the database.
 - Run 2_getsize.rb second to download the file size of each file and store in the database.
