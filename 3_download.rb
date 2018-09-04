@@ -1,24 +1,19 @@
 # Step 3 in the process:  Actually do the downloads.
-# Update the DOWNLOAD_LIMIT constant to limit how much to do per run.
 
-require 'sqlite3'
+# Standard libraries
 require 'net/http'
 require 'digest'
+require 'optparse'
+require 'pathname'
+# 3rd-party gems
+require 'sqlite3'
 require 'progressbar'
+require 'pp'
 
-# Where to store the downloaded stuff
-DLDIR = '/path/to/downloads'
-
-# Define convenience values
+# Define convenience constants
 KBYTE = 1024
 MBYTE = KBYTE * 1024
 GBYTE = MBYTE * 1024
-
-# Configure how much to download at one go
-DOWNLOAD_LIMIT = 20 * GBYTE
-
-# Define the download rate per second (in bytes), unlimited if commented out
-RATE_LIMIT = 256 * KBYTE
 
 # Pretty-print decimal numbers
 # https://dzone.com/articles/format-number-thousands
@@ -26,19 +21,82 @@ def commas(number)
   return sprintf("%d", number).gsub(/(\d)(?=\d{3}+$)/, '\1,')
 end
 
+# Set up option parsing
+Options = Struct.new(:rate,:limit,:dlpath)
+class Parser
+  def self.parse(options)
+    args = Options.new("world")
+
+    # Defaults
+    args.rate = 256 * KBYTE
+    args.limit = 20 * GBYTE
+
+    optParser = OptionParser.new do |opts|
+      opts.banner = "Usage: #{$0}"
+
+      opts.on("-r","--rate KBYTESEC","Limit download rate to specified kbytes/sec (default 256)") do |n|
+        args.rate = n.to_i * KBYTE
+        if args.rate <= 0 then
+          STDERR.puts "Rate limit must be a non-zero value!"
+          Kernel.exit(1)
+        end
+      end
+  
+      opts.on("-l","--limit GBYTES","Limit download to specified gbytes of data (default 20)") do |n|
+        args.limit = n.to_i * GBYTE
+        if args.limit <= 0 then
+          STDERR.puts "Download limit must be a non-zero value!"
+          Kernel.exit(1)
+        end
+      end
+      
+      opts.on("-o","--outdir PATH","Path to download directory (required)") do |n|
+        dir = Pathname.new(n)
+        if not dir.exist? then
+          STDERR.puts "Specified output directory does not exist!"
+          Kernel.exit(1)
+        end
+        args.dlpath = dir.realpath
+      end
+      
+      opts.on("-h","--help","Prints this help") do
+        puts opts
+        Kernel.exit(0)
+      end
+    end
+    optParser.parse!(options)
+    return args
+  end
+end
+options = Parser.parse(ARGV)
+
+# Check to make sure we have an output directory
+if options.dlpath.nil? then
+  STDERR.puts "Output directory not specified!"
+  Kernel.exit(1)
+end
+
+# Report on what options we're running with
+STDERR.puts <<-EOS
+Output directory: #{options.dlpath.to_s}
+      Rate limit: #{(options.rate / KBYTE).to_i} kbytes/sec
+  Download limit: #{(options.limit / GBYTE).to_i} gbytes
+  
+EOS
+
 # Count how many bytes have been downloaded
 downloaded = 0
 
-# Make sure the download directory exists
-Dir.mkdir(DLDIR) if not Dir.exist?(DLDIR)
-
 # Open the database
+# TODO: Assumes its in the same directory that you're in...
 db = SQLite3::Database.open('soundfiles.db')
 
 # Prepare the update statement
 stmt = db.prepare("update soundfiles set downloaded=?, sha256=? where id=?")
 
 # Get the list of things-to-download
+# TODO: Suppose I could do an option for size ordering...
+#rs = db.execute("select id,filename,size from soundfiles where downloaded = 0 order by size desc")
 rs = db.execute("select id,filename,size from soundfiles where downloaded = 0")
 rowcount = rs.size
 STDERR.puts "#{Time.now} : #{rowcount} to download"
@@ -56,13 +114,13 @@ count = 0
 # Iterate over the rows
 rs.each do |row|
   # Stop if we're over the defined download-per-go byte limit
-  break if downloaded >= DOWNLOAD_LIMIT
+  break if downloaded >= options.limit
   # Increment row count and spit out information
   count += 1
-  STDERR.puts "#{Time.now}: #{commas(count)}/#{commas(rowcount)} - #{commas(DOWNLOAD_LIMIT - downloaded)} bytes left - #{commas(row[0])} : #{row[1]} : #{commas(row[2])}"
+  STDERR.puts "#{Time.now}: #{commas(count)}/#{commas(rowcount)} - #{commas(options.limit - downloaded)} bytes left - #{commas(row[0])} : #{row[1]} : #{commas(row[2])}"
 
   # Determine the path where to write the file
-  filename = "#{DLDIR}/#{row[1]}"
+  filename = "#{options.dlpath.to_s}/#{row[1]}"
 
   # Set up progress bar
   bytecounter = 0
@@ -75,28 +133,28 @@ rs.each do |row|
   )
   # Open the output file
   File.open(filename,'wb') do |file|
-    # For rate limiting, store the time we start the download process
-    startTime = Time.now.to_f
+    startTime = Time.now.to_f   # Get the timestamp for when we start
     # Perform the download, incrementing the progress bar as it goes
     http.get("/assets/#{row[1]}") do |data|
+      # Write the received data
       file.write data
+      # Increment progress bar and byte count
       bytecounter += data.length
       pbar.progress = bytecounter
-      # Handle rate limiting, if defined
-      if defined?(RATE_LIMIT) then
-        # Total time spend for the download
-        timeTotal = Time.now.to_f - startTime
-        # Average bytes per second
-        rate = bytecounter / timeTotal
-        # If we've downloaded more than we wanted...
-        if rate > RATE_LIMIT then
-          howLong = (bytecounter.to_f / RATE_LIMIT)  # How many seconds it should've taken at RATE_LIMIT
-          toSleep = howLong-timeTotal  # Calc how long to sleep for to maintain the rate
-          sleep(toSleep) #Sleep
-        end
+      # Get the total time we've been downloading
+      timeTotal = Time.now.to_f - startTime
+      # Calculate average bytes per second
+      rate = bytecounter / timeTotal
+      # Handle if the average rate is over what we want
+      if rate > options.rate then
+        # How many seconds it should've taken at options.rate
+        howLong = (bytecounter.to_f / options.rate)
+        # Sleep for a period to maintain average rate
+        sleep(howLong-timeTotal)
       end
-    end
-  end
+    end # http.get
+  end # File.open
+
   # Close out the progresss bar
   pbar.finish
 
@@ -119,7 +177,7 @@ rs.each do |row|
   # Hash the file
   hashdigest = Digest::SHA256.file(filename).hexdigest
 
-  # Update database
+  # Update database, marking it downloaded and storing the hash
   stmt.execute(1,hashdigest,row[0].to_i)
 
   # Add to the downloaded bytes counter
