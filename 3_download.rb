@@ -22,7 +22,7 @@ def commas(number)
 end
 
 # Set up option parsing
-Options = Struct.new(:rate,:limit,:dlpath)
+Options = Struct.new(:rate,:limit,:dlpath,:sizeReverse)
 class Parser
   def self.parse(options)
     args = Options.new("world")
@@ -30,6 +30,7 @@ class Parser
     # Defaults
     args.rate = 256 * KBYTE
     args.limit = 20 * GBYTE
+    args.sizeReverse = false
 
     optParser = OptionParser.new do |opts|
       opts.banner = "Usage: #{$0}"
@@ -57,6 +58,10 @@ class Parser
           Kernel.exit(1)
         end
         args.dlpath = dir.realpath
+      end
+      
+      opts.on("-s","--size","Download largest files first, instead of smallest") do |n|
+        args.sizeReverse = true
       end
       
       opts.on("-h","--help","Prints this help") do
@@ -95,9 +100,14 @@ db = SQLite3::Database.open('soundfiles.db')
 stmt = db.prepare("update soundfiles set downloaded=?, sha256=? where id=?")
 
 # Get the list of things-to-download
-# TODO: Suppose I could do an option for size ordering...
-#rs = db.execute("select id,filename,size from soundfiles where downloaded = 0 order by size desc")
-rs = db.execute("select id,filename,size from soundfiles where downloaded = 0")
+sql = "select id,filename,size from soundfiles where downloaded = 0 order by size "
+if options.sizeReverse then
+  sql += "desc"
+else
+  sql += "asc"
+end
+
+rs = db.execute(sql)
 rowcount = rs.size
 STDERR.puts "#{Time.now} : #{rowcount} to download"
 if rowcount == 0 then
